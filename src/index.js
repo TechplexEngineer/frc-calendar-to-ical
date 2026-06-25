@@ -204,7 +204,7 @@ async function parseFrcEvents(htmlText) {
         }
       }
     })
-    .on('div.calendar-lightbox-content .lightbox-programs span', {
+    .on('div.calendar-lightbox-content .lightbox-programs span, div.calendar-lightbox-content .lightbox-programs a', {
       element(el) {
         currentTarget = 'program';
         currentText = '';
@@ -221,7 +221,7 @@ async function parseFrcEvents(htmlText) {
         }
       }
     })
-    .on('div.calendar-lightbox-content .lightbox-categories span', {
+    .on('div.calendar-lightbox-content .lightbox-categories span, div.calendar-lightbox-content .lightbox-categories a', {
       element(el) {
         currentTarget = 'category';
         currentText = '';

@@ -4,3 +4,5 @@ are there other files that sould be added to the .gitignore?
 
 If the event ends with the word "closes" only use the end date
 if the event starts with the word "opens" only use the start date
+
+why are some events missing, for example "Woodie Flowers Award Application Opens"
