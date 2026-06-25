@@ -1,0 +1,14 @@
+{
+  "name": "frc-calendar-sync",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker to synchronize FRC calendar events to iCal",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
