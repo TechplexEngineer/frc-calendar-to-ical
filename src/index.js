@@ -92,11 +92,39 @@ async function parseFrcEvents(htmlText) {
             if (isFrc && currentLightbox.gcalUrl) {
               const parsedGcal = parseGcalUrl(currentLightbox.gcalUrl);
               if (parsedGcal) {
+                let startStr = parsedGcal.startStr;
+                let endStr = parsedGcal.endStr;
+                const title = parsedGcal.text || currentLightbox.title || 'FRC Event';
+                
+                const trimmedTitle = title.trim();
+                const lowerTitle = trimmedTitle.toLowerCase();
+                const isTimed = startStr.includes('T');
+
+                if (lowerTitle.endsWith('closes')) {
+                  if (isTimed) {
+                    startStr = endStr;
+                  } else {
+                    const endDate = parseYyyyMmDd(endStr);
+                    const startDate = new Date(endDate.getTime());
+                    startDate.setUTCDate(startDate.getUTCDate() - 1);
+                    startStr = formatYyyyMmDd(startDate);
+                  }
+                } else if (lowerTitle.startsWith('opens')) {
+                  if (isTimed) {
+                    endStr = startStr;
+                  } else {
+                    const startDate = parseYyyyMmDd(startStr);
+                    const endDate = new Date(startDate.getTime());
+                    endDate.setUTCDate(endDate.getUTCDate() + 1);
+                    endStr = formatYyyyMmDd(endDate);
+                  }
+                }
+
                 events.push({
-                  title: parsedGcal.text || currentLightbox.title || 'FRC Event',
+                  title: trimmedTitle,
                   description: currentLightbox.description,
-                  startStr: parsedGcal.startStr,
-                  endStr: parsedGcal.endStr,
+                  startStr,
+                  endStr,
                   location: parsedGcal.location,
                   ctz: parsedGcal.ctz,
                   gcalUrl: currentLightbox.gcalUrl
@@ -252,6 +280,8 @@ function generateICal(events) {
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'X-WR-CALNAME:FRC Season Calendar',
+    'X-WR-CALDESC:FIRST Robotics Competition Season Calendar',
+    'NAME:FRC Season Calendar',
     'X-WR-TIMEZONE:America/New_York',
     'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
     'X-PUBLISHED-TTL:PT1H'
@@ -346,3 +376,24 @@ function slugify(text) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '');
 }
+
+/**
+ * Parses YYYYMMDD into a Date object.
+ */
+function parseYyyyMmDd(str) {
+  const y = parseInt(str.substring(0, 4), 10);
+  const m = parseInt(str.substring(4, 6), 10) - 1;
+  const d = parseInt(str.substring(6, 8), 10);
+  return new Date(Date.UTC(y, m, d));
+}
+
+/**
+ * Formats a Date object as a YYYYMMDD string.
+ */
+function formatYyyyMmDd(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
