@@ -1,6 +1,18 @@
+const calendarUrl = 'https://www.firstinspires.org/programs/calendar?view=list&program=frc';
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const testSlack = url.searchParams.get('test-slack') === 'true';
+    if (testSlack) {
+      try {
+        await handleScheduled(env);
+        return new Response('Slack test trigger completed successfully.', { status: 200 });
+      } catch (err) {
+        return new Response(`Slack test trigger failed: ${err.message}`, { status: 500 });
+      }
+    }
+
     const bypassCache = url.searchParams.get('bypass') === 'true';
     const getJSON = url.searchParams.get('format') === 'json';
 
@@ -16,7 +28,7 @@ export default {
 
     try {
       // Fetch FRC calendar page from FIRST Inspires
-      const calendarUrl = 'https://www.firstinspires.org/programs/calendar?view=list&program=frc';
+      
       const targetResponse = await fetch(calendarUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -72,6 +84,10 @@ export default {
         headers: { 'Content-Type': 'text/plain' }
       });
     }
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(handleScheduled(env));
   }
 };
 
@@ -409,5 +425,119 @@ function formatYyyyMmDd(date) {
   const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}${m}${d}`;
+}
+
+/**
+ * Scheduled handler to fetch events weekly and post to Slack.
+ */
+async function handleScheduled(env) {
+  if (!env.SLACK_WEBHOOK_URL) {
+    console.error('SLACK_WEBHOOK_URL environment variable is not set.');
+    return;
+  }
+
+  try {
+    // 1. Fetch calendar page
+    const response = await fetch(calendarUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch FRC calendar: ${response.status} ${response.statusText}`);
+    }
+
+    const htmlText = await response.text();
+    const events = await parseFrcEvents(htmlText);
+
+    // 2. Filter events that start or end "this week"
+    const now = new Date();
+    // Get Sunday of the current week (UTC-based logic, aligned to America/New_York days)
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const dayOfWeek = todayUtc.getUTCDay();
+    const startOfWeek = new Date(todayUtc);
+    startOfWeek.setUTCDate(todayUtc.getUTCDate() - dayOfWeek);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setUTCDate(startOfWeek.getUTCDate() + 7);
+
+    const filteredEvents = events.filter(e => {
+      const startDay = parseYyyyMmDd(e.startStr.substring(0, 8));
+      const endDay = parseYyyyMmDd(e.endStr.substring(0, 8));
+      // For all-day events, the end date is exclusive, so the last active day is endDay - 1 day.
+      const activeEndDay = e.startStr.includes('T') ? endDay : new Date(endDay.getTime() - 24 * 60 * 60 * 1000);
+
+      const startsThisWeek = startDay >= startOfWeek && startDay < endOfWeek;
+      const endsThisWeek = activeEndDay >= startOfWeek && activeEndDay < endOfWeek;
+
+      return startsThisWeek || endsThisWeek;
+    });
+
+    if (filteredEvents.length === 0) {
+      console.log('No events starting or ending this week.');
+      return;
+    }
+
+    // 3. Format according to the user's requested snippet
+    const input = {
+      array: filteredEvents.map(e => {
+        const absoluteDate = parseToAbsoluteDate(e.startStr, e.ctz);
+        return {
+          summary: e.title,
+          start: absoluteDate.getTime()
+        };
+      })
+    };
+
+    // User's formatting logic
+    const payload = {
+      "events": input.array.map(e => `- ${e.summary}: ${new Date(e.start).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true,
+        timeZone: 'America/New_York' })}`).join("\n")
+    };
+
+    // 4. Send to Slack webhook
+    const slackRes = await fetch(env.SLACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!slackRes.ok) {
+      throw new Error(`Slack post failed: ${slackRes.status} ${slackRes.statusText}`);
+    }
+
+    console.log('Successfully posted events to Slack.');
+  } catch (error) {
+    console.error('Error in scheduled handler:', error);
+    throw error;
+  }
+}
+
+/**
+ * Parses YYYYMMDD or YYYYMMDDTHHMMSS in America/New_York (or other ctz)
+ * and returns a standard Date object representing that exact point in time.
+ */
+function parseToAbsoluteDate(dateStr, timezone = 'America/New_York') {
+  const y = dateStr.substring(0, 4);
+  const m = dateStr.substring(4, 6);
+  const d = dateStr.substring(6, 8);
+  
+  let localDate;
+  if (dateStr.includes('T')) {
+    const hh = dateStr.substring(9, 11);
+    const mm = dateStr.substring(11, 13);
+    const ss = dateStr.substring(13, 15);
+    localDate = new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}`);
+  } else {
+    localDate = new Date(`${y}-${m}-${d}T00:00:00`);
+  }
+
+  // Shift by timezone offset to represent the correct epoch timestamp in Workers
+  const tzDate = new Date(localDate.toLocaleString('en-US', { timeZone: timezone }));
+  const diff = localDate.getTime() - tzDate.getTime();
+  return new Date(localDate.getTime() + diff);
 }
 
