@@ -1,0 +1,71 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Start Wrangler Dev Server
+        run: npx wrangler dev &
+        env:
+          CI: true
+
+      - name: Wait for server to start
+        run: |
+          for i in {1..15}; do
+            if curl -s "http://localhost:8787/?bypass=true" > /dev/null; then
+              echo "Dev server is up!"
+              exit 0
+            fi
+            echo "Waiting for dev server to start..."
+            sleep 2
+          done
+          echo "Server failed to start in time"
+          exit 1
+
+      - name: Run Validation Tests
+        run: npm test
+
+  deploy:
+    name: Deploy to Cloudflare Workers
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
