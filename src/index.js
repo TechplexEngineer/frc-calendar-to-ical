@@ -2,6 +2,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const bypassCache = url.searchParams.get('bypass') === 'true';
+    const getJSON = url.searchParams.get('format') === 'json';
 
     const cacheKey = new Request(request.url, request);
     const cache = caches.default;
@@ -32,6 +33,19 @@ export default {
 
       const htmlText = await targetResponse.text();
       const events = await parseFrcEvents(htmlText);
+
+      if(getJSON) {
+        return new Response(JSON.stringify(events), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            // 'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+          }
+        });
+      }
+
+      // console.log(events)
 
       // Generate iCal feed
       const icalContent = generateICal(events);
@@ -109,7 +123,7 @@ async function parseFrcEvents(htmlText) {
                     startDate.setUTCDate(startDate.getUTCDate() - 1);
                     startStr = formatYyyyMmDd(startDate);
                   }
-                } else if (lowerTitle.startsWith('opens')) {
+                } else if (lowerTitle.endsWith('opens')) {
                   if (isTimed) {
                     endStr = startStr;
                   } else {
